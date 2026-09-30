@@ -1,0 +1,26 @@
+{
+  "name": "setoran-tahfidz",
+  "version": "1.0.0",
+  "description": "Setoran Tahfidz - offline Al-Qur'an memorization tracking app, wrapped as an Android app with Capacitor.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "tahfidz",
+    "quran",
+    "capacitor",
+    "android"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.2"
+  }
+}

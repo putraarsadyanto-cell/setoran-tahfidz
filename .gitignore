@@ -1,0 +1,32 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Capacitor
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/capacitor-cordova-android-plugins/build/
+ios/
+
+# Android Studio / Gradle
+*.iml
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+
+# Release signing secrets - NEVER commit these
+android/keystore.properties
+release-signing/*.jks
+release-signing/*.keystore
+*.jks
+*.keystore
+
+# Misc
+*.log
+.env
