@@ -1554,22 +1554,47 @@
 
       canvas.toBlob(function (blob) {
         var filename = "setoran_" + s.name.replace(/\s+/g, "_") + "_" + BULAN_ID[m0] + "_" + yr + ".png";
-        if (window.claude && typeof window.claude.use === "function") {
-          window.claude.use("downloads").then(function (downloads) {
-            if (!downloads) { fallbackDownload(blob, filename); return; }
-            downloads.save({ filename: filename, data: blob }).then(function () {
-              showToast("Gambar disimpan");
-            }).catch(function (err) {
-              if (err && err.code === "declined") return;
-              fallbackDownload(blob, filename);
-            });
-          }).catch(function () { fallbackDownload(blob, filename); });
+        if (isNativeApp()) {
+          saveViaCapacitor(blob, filename);
         } else {
           fallbackDownload(blob, filename);
         }
       }, "image/png");
     };
     img.src = TEMPLATE_URI;
+  }
+
+  function isNativeApp() {
+    return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === "function" && window.Capacitor.isNativePlatform());
+  }
+
+  // Di dalam aplikasi Android (Capacitor), unduhan lewat <a download> pada blob:
+  // URL tidak berfungsi karena WebView Android tidak mendukungnya. Sebagai
+  // gantinya, simpan file ke cache aplikasi lalu buka lembar "Bagikan" bawaan
+  // Android supaya pengguna bisa menyimpannya ke Berkas/Galeri/aplikasi lain.
+  function saveViaCapacitor(blob, filename) {
+    var Plugins = window.Capacitor && window.Capacitor.Plugins;
+    var Filesystem = Plugins && Plugins.Filesystem;
+    if (!Filesystem) { fallbackDownload(blob, filename); return; }
+    var reader = new FileReader();
+    reader.onerror = function () { fallbackDownload(blob, filename); };
+    reader.onload = function () {
+      var base64 = String(reader.result).split(",")[1];
+      Filesystem.writeFile({ path: filename, data: base64, directory: "CACHE" }).then(function (res) {
+        var Share = Plugins.Share;
+        if (Share && typeof Share.share === "function") {
+          Share.share({ title: filename, url: res.uri, dialogTitle: "Simpan laporan" }).then(function () {
+            showToast("Gambar siap disimpan");
+          }).catch(function (err) {
+            if (err && /cancel/i.test(err.message || "")) return;
+            showToast("Gambar tersimpan, tidak bisa membuka menu bagikan");
+          });
+        } else {
+          showToast("Gambar tersimpan di aplikasi");
+        }
+      }).catch(function () { fallbackDownload(blob, filename); });
+    };
+    reader.readAsDataURL(blob);
   }
 
   function fallbackDownload(blob, filename) {
