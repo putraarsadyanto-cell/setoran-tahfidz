@@ -1580,7 +1580,14 @@
     reader.onerror = function () { fallbackDownload(blob, filename); };
     reader.onload = function () {
       var base64 = String(reader.result).split(",")[1];
+      // "CACHE" adalah nilai string dari Directory.Cache pada @capacitor/filesystem;
+      // dipakai langsung (tanpa impor modul) karena halaman ini tidak memakai bundler.
       Filesystem.writeFile({ path: filename, data: base64, directory: "CACHE" }).then(function (res) {
+        // Hapus file sementara belakangan (bukan langsung setelah share selesai),
+        // supaya aplikasi tujuan yang dipilih pengguna sempat selesai membaca isinya.
+        var cleanup = function () {
+          setTimeout(function () { Filesystem.deleteFile({ path: filename, directory: "CACHE" }).catch(function () {}); }, 60000);
+        };
         var Share = Plugins.Share;
         if (Share && typeof Share.share === "function") {
           Share.share({ title: filename, url: res.uri, dialogTitle: "Simpan laporan" }).then(function () {
@@ -1588,7 +1595,7 @@
           }).catch(function (err) {
             if (err && /cancel/i.test(err.message || "")) return;
             showToast("Gambar tersimpan, tidak bisa membuka menu bagikan");
-          });
+          }).then(cleanup, cleanup);
         } else {
           showToast("Gambar tersimpan di aplikasi");
         }
