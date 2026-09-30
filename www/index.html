@@ -1585,8 +1585,11 @@
       Filesystem.writeFile({ path: filename, data: base64, directory: "CACHE" }).then(function (res) {
         // Hapus file sementara belakangan (bukan langsung setelah share selesai),
         // supaya aplikasi tujuan yang dipilih pengguna sempat selesai membaca isinya.
+        // 60 detik dianggap cukup lama untuk aplikasi tujuan (Files/Galeri/dll) selesai
+        // menyalin/membaca file dari content:// URI sebelum kita menghapusnya dari cache.
+        var CLEANUP_DELAY_MS = 60000;
         var cleanup = function () {
-          setTimeout(function () { Filesystem.deleteFile({ path: filename, directory: "CACHE" }).catch(function () {}); }, 60000);
+          setTimeout(function () { Filesystem.deleteFile({ path: filename, directory: "CACHE" }).catch(function () {}); }, CLEANUP_DELAY_MS);
         };
         var Share = Plugins.Share;
         if (Share && typeof Share.share === "function") {
