@@ -744,7 +744,53 @@
 
   // ---------------- Backup (ekspor) & Pulihkan (impor) ----------------
 
+  // Blob-URL <a download> tricks and the Claude "downloads" bridge don't work
+  // inside the Capacitor Android WebView (there's no native download handler
+  // wired up for them). When running as the packaged Android app, write the
+  // file to app cache storage via @capacitor/filesystem and hand it off to
+  // the native Share sheet via @capacitor/share instead, so the user can save
+  // it to their gallery/Downloads or share it directly. Browser behavior is
+  // untouched.
+  function isNativeApp() {
+    return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === "function" && window.Capacitor.isNativePlatform());
+  }
+
+  function blobToBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onloadend = function () {
+        var result = reader.result || "";
+        var comma = result.indexOf(",");
+        resolve(comma >= 0 ? result.slice(comma + 1) : result);
+      };
+      reader.onerror = function () { reject(reader.error || new Error("Gagal membaca berkas")); };
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function saveNative(base64Data, filename) {
+    var plugins = window.Capacitor.Plugins || {};
+    var Filesystem = plugins.Filesystem;
+    var Share = plugins.Share;
+    if (!Filesystem || !Share) return Promise.reject(new Error("Plugin Filesystem/Share tidak tersedia"));
+    return Filesystem.writeFile({ path: filename, data: base64Data, directory: "CACHE" })
+      .then(function (result) {
+        return Share.share({ title: filename, dialogTitle: "Simpan atau bagikan " + filename, url: result.uri });
+      });
+  }
+
   function saveFile(blob, filename) {
+    if (isNativeApp()) {
+      blobToBase64(blob).then(function (base64) {
+        return saveNative(base64, filename);
+      }).then(function () {
+        showToast("Siap disimpan/dibagikan");
+      }).catch(function (err) {
+        console.error("Gagal menyimpan berkas (native):", err);
+        alert("Gagal menyimpan berkas: " + (err && err.message ? err.message : err));
+      });
+      return;
+    }
     if (window.claude && typeof window.claude.use === "function") {
       window.claude.use("downloads").then(function (downloads) {
         if (!downloads) { fallbackDownload(blob, filename); return; }
@@ -1552,8 +1598,12 @@
       });
       ctx.textAlign = "left";
 
+      var filename = "setoran_" + s.name.replace(/\s+/g, "_") + "_" + BULAN_ID[m0] + "_" + yr + ".png";
+      if (isNativeApp()) {
+        exportImageNative(canvas, filename);
+        return;
+      }
       canvas.toBlob(function (blob) {
-        var filename = "setoran_" + s.name.replace(/\s+/g, "_") + "_" + BULAN_ID[m0] + "_" + yr + ".png";
         if (window.claude && typeof window.claude.use === "function") {
           window.claude.use("downloads").then(function (downloads) {
             if (!downloads) { fallbackDownload(blob, filename); return; }
@@ -1570,6 +1620,25 @@
       }, "image/png");
     };
     img.src = TEMPLATE_URI;
+  }
+
+  // Native (Android app) image export: canvas -> base64 PNG -> Filesystem
+  // cache file -> native Share sheet (no blob-URL <a download>, which the
+  // Capacitor WebView silently ignores).
+  function exportImageNative(canvas, filename) {
+    try {
+      var base64 = canvas.toDataURL("image/png").split(",")[1];
+      var uniqueName = filename.replace(/\.png$/, "") + "_" + Date.now() + ".png";
+      saveNative(base64, uniqueName).then(function () {
+        showToast("Gambar siap disimpan/dibagikan");
+      }).catch(function (err) {
+        console.error("Gagal membagikan gambar:", err);
+        alert("Gagal menyimpan gambar: " + (err && err.message ? err.message : err));
+      });
+    } catch (err) {
+      console.error("Gagal membuat gambar:", err);
+      alert("Gagal membuat gambar: " + (err && err.message ? err.message : err));
+    }
   }
 
   function fallbackDownload(blob, filename) {
