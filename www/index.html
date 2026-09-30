@@ -1604,6 +1604,11 @@
         return;
       }
       canvas.toBlob(function (blob) {
+<<<<<<< HEAD
+        var filename = "setoran_" + s.name.replace(/\s+/g, "_") + "_" + BULAN_ID[m0] + "_" + yr + ".png";
+        if (isNativeApp()) {
+          saveViaCapacitor(blob, filename);
+=======
         if (window.claude && typeof window.claude.use === "function") {
           window.claude.use("downloads").then(function (downloads) {
             if (!downloads) { fallbackDownload(blob, filename); return; }
@@ -1614,6 +1619,7 @@
               fallbackDownload(blob, filename);
             });
           }).catch(function () { fallbackDownload(blob, filename); });
+>>>>>>> origin/main
         } else {
           fallbackDownload(blob, filename);
         }
@@ -1622,6 +1628,49 @@
     img.src = TEMPLATE_URI;
   }
 
+<<<<<<< HEAD
+  function isNativeApp() {
+    return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === "function" && window.Capacitor.isNativePlatform());
+  }
+
+  // Di dalam aplikasi Android (Capacitor), unduhan lewat <a download> pada blob:
+  // URL tidak berfungsi karena WebView Android tidak mendukungnya. Sebagai
+  // gantinya, simpan file ke cache aplikasi lalu buka lembar "Bagikan" bawaan
+  // Android supaya pengguna bisa menyimpannya ke Berkas/Galeri/aplikasi lain.
+  function saveViaCapacitor(blob, filename) {
+    var Plugins = window.Capacitor && window.Capacitor.Plugins;
+    var Filesystem = Plugins && Plugins.Filesystem;
+    if (!Filesystem) { fallbackDownload(blob, filename); return; }
+    var reader = new FileReader();
+    reader.onerror = function () { fallbackDownload(blob, filename); };
+    reader.onload = function () {
+      var base64 = String(reader.result).split(",")[1];
+      // "CACHE" adalah nilai string dari Directory.Cache pada @capacitor/filesystem;
+      // dipakai langsung (tanpa impor modul) karena halaman ini tidak memakai bundler.
+      Filesystem.writeFile({ path: filename, data: base64, directory: "CACHE" }).then(function (res) {
+        // Hapus file sementara belakangan (bukan langsung setelah share selesai),
+        // supaya aplikasi tujuan yang dipilih pengguna sempat selesai membaca isinya.
+        // 60 detik dianggap cukup lama untuk aplikasi tujuan (Files/Galeri/dll) selesai
+        // menyalin/membaca file dari content:// URI sebelum kita menghapusnya dari cache.
+        var CLEANUP_DELAY_MS = 60000;
+        var cleanup = function () {
+          setTimeout(function () { Filesystem.deleteFile({ path: filename, directory: "CACHE" }).catch(function () {}); }, CLEANUP_DELAY_MS);
+        };
+        var Share = Plugins.Share;
+        if (Share && typeof Share.share === "function") {
+          Share.share({ title: filename, url: res.uri, dialogTitle: "Simpan laporan" }).then(function () {
+            showToast("Gambar siap disimpan");
+          }).catch(function (err) {
+            if (err && /cancel/i.test(err.message || "")) return;
+            showToast("Gambar tersimpan, tidak bisa membuka menu bagikan");
+          }).then(cleanup, cleanup);
+        } else {
+          showToast("Gambar tersimpan di aplikasi");
+        }
+      }).catch(function () { fallbackDownload(blob, filename); });
+    };
+    reader.readAsDataURL(blob);
+=======
   // Native (Android app) image export: canvas -> base64 PNG -> Filesystem
   // cache file -> native Share sheet (no blob-URL <a download>, which the
   // Capacitor WebView silently ignores).
@@ -1639,6 +1688,7 @@
       console.error("Gagal membuat gambar:", err);
       alert("Gagal membuat gambar: " + (err && err.message ? err.message : err));
     }
+>>>>>>> origin/main
   }
 
   function fallbackDownload(blob, filename) {
