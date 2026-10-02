@@ -580,6 +580,11 @@
             <img id="watermarkPreview" alt="Pratinjau watermark" style="width:52px; height:52px; object-fit:contain; border-radius:8px; background:var(--plum-tint); padding:4px;">
             <button type="button" class="btn btn-outline" id="btnRemoveWatermark" style="width:auto; padding:8px 14px;">Hapus gambar</button>
           </div>
+          <div id="watermarkScaleWrap" style="display:none; align-items:center; gap:10px; margin:0 0 9px;">
+            <label for="setWatermarkScale" style="flex:0 0 auto; margin:0; font-size:14px;">Ukuran gambar latar</label>
+            <input type="range" id="setWatermarkScale" min="30" max="150" step="5" style="flex:1 1 auto;">
+            <span id="watermarkScaleVal" style="flex:0 0 auto; min-width:42px; text-align:right; font-size:13.5px; color:var(--ink-soft);">100%</span>
+          </div>
           <input type="file" id="setWatermarkFile" accept="image/*">
         </div>
         <label class="toggle-row"><span><b>Rincian harian di ringkasan teks</b><small>Matikan bila ingin ringkasan hanya berisi total hadir, izin, sakit, dan ghoib.</small></span><input type="checkbox" class="sw" role="switch" data-key="detail"></label>
@@ -1649,7 +1654,14 @@
       if (watermarkImg) {
         var tableX0 = 60 * S, tableX1 = 1173 * S;
         var areaTop = TPL.row1Top * S, areaBottom = yEnd * S;
-        var maxW = (tableX1 - tableX0) * 0.65, maxH = (areaBottom - areaTop) * 0.65;
+        // Skala dasar ~65% lebar/tinggi area tabel, dikalikan pengaturan
+        // "Ukuran gambar latar" (30%-150%, default 100% = tampilan semula).
+        var wmScalePct = (typeof settings.watermarkScale === "number" ? settings.watermarkScale : 100) / 100;
+        var maxW = (tableX1 - tableX0) * 0.65 * wmScalePct, maxH = (areaBottom - areaTop) * 0.65 * wmScalePct;
+        // Jaga agar gambar tidak jauh melebihi batas tabel meski skala besar,
+        // dan tidak hilang/terlalu kecil pada skala minimum.
+        maxW = Math.min(maxW, (tableX1 - tableX0) * 0.98);
+        maxH = Math.min(maxH, (areaBottom - areaTop) * 0.98);
         var ratio = Math.min(maxW / watermarkImg.naturalWidth, maxH / watermarkImg.naturalHeight);
         var wmW = watermarkImg.naturalWidth * ratio, wmH = watermarkImg.naturalHeight * ratio;
         var wmX = tableX0 + (tableX1 - tableX0 - wmW) / 2;
@@ -1905,7 +1917,7 @@
 
   var SETTINGS_KEY = "tahfidz_settings_v1";
   var DEFAULT_SETTINGS = { mode: "auto", palette: "ungu", fs: 1, arabic: true, lembaga: "", pengajar: "", watermark: "",
-    detail: true, suggest: true, startTab: "catat", vibrate: false, backupEvery: 7 };
+    watermarkScale: 100, detail: true, suggest: true, startTab: "catat", vibrate: false, backupEvery: 7 };
   var PALETTE_KEYS = ["ungu", "zamrud", "samudra", "kurma", "mawar"];
   var DEFAULT_SUBTITLE = "Catatan tahsin \u00b7 tahfidz \u00b7 murojaah harian";
   var pendingSettings = null;
@@ -1920,6 +1932,7 @@
     ["arabic", "detail", "suggest", "vibrate"].forEach(function (key) { if (typeof o[key] === "boolean") r[key] = o[key]; });
     ["lembaga", "pengajar"].forEach(function (key) { if (typeof o[key] === "string") r[key] = o[key].slice(0, 60); });
     if (typeof o.watermark === "string" && o.watermark.length < 2000000 && /^data:image\//.test(o.watermark)) r.watermark = o.watermark;
+    if (typeof o.watermarkScale === "number" && o.watermarkScale >= 30 && o.watermarkScale <= 150) r.watermarkScale = o.watermarkScale;
     if (["catat", "laporan"].indexOf(o.startTab) >= 0) r.startTab = o.startTab;
     if (typeof o.backupEvery === "number" && [0, 7, 14, 30].indexOf(o.backupEvery) >= 0) r.backupEvery = o.backupEvery;
     return r;
@@ -1972,12 +1985,19 @@
     });
     var wmWrap = document.getElementById("watermarkPreviewWrap");
     var wmPreview = document.getElementById("watermarkPreview");
+    var wmScaleWrap = document.getElementById("watermarkScaleWrap");
+    var wmScaleInput = document.getElementById("setWatermarkScale");
+    var wmScaleVal = document.getElementById("watermarkScaleVal");
     if (settings.watermark) {
       wmPreview.src = settings.watermark;
       wmWrap.style.display = "flex";
+      wmScaleWrap.style.display = "flex";
+      if (document.activeElement !== wmScaleInput) wmScaleInput.value = settings.watermarkScale;
+      wmScaleVal.textContent = settings.watermarkScale + "%";
     } else {
       wmPreview.src = "";
       wmWrap.style.display = "none";
+      wmScaleWrap.style.display = "none";
     }
   }
 
@@ -2035,6 +2055,14 @@
   });
   document.getElementById("btnRemoveWatermark").addEventListener("click", function () {
     settings.watermark = "";
+    commitSettings();
+  });
+  document.getElementById("setWatermarkScale").addEventListener("input", function (e) {
+    settings.watermarkScale = Number(e.target.value);
+    document.getElementById("watermarkScaleVal").textContent = settings.watermarkScale + "%";
+    saveSettings();
+  });
+  document.getElementById("setWatermarkScale").addEventListener("change", function () {
     commitSettings();
   });
 
