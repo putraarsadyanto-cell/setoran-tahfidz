@@ -542,7 +542,7 @@
         </div>
         <div class="set-row">
           <div class="set-label" id="lblPal">Warna aplikasi</div>
-          <p class="set-desc">Gambar laporan yang diunduh tetap memakai template aslinya.</p>
+          <p class="set-desc">Gambar laporan yang diunduh mengikuti warna tema ini, dan bisa ditambahi watermark lembaga (atur di bagian Lembaga &amp; laporan).</p>
           <div class="swatches" role="radiogroup" aria-labelledby="lblPal" data-key="palette">
             <button type="button" role="radio" class="swatch" data-v="ungu" style="--a:#5b2a6b;--b:#d9bfe6"><i></i>Ungu</button>
             <button type="button" role="radio" class="swatch" data-v="zamrud" style="--a:#1f6b4a;--b:#bfe8d0"><i></i>Zamrud</button>
@@ -572,6 +572,15 @@
         <div class="field">
           <label for="setPengajar">Nama pengajar</label>
           <input type="text" id="setPengajar" data-key="pengajar" maxlength="60" placeholder="Nama pengajar" autocomplete="off" autocapitalize="words" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="setWatermarkFile">Gambar watermark laporan (opsional)</label>
+          <p class="set-desc" style="margin-top:-4px">Logo/lambang ini akan tampak samar di tengah tabel gambar laporan yang diunduh.</p>
+          <div id="watermarkPreviewWrap" style="display:none; align-items:center; gap:10px; margin-bottom:9px;">
+            <img id="watermarkPreview" alt="Pratinjau watermark" style="width:52px; height:52px; object-fit:contain; border-radius:8px; background:var(--plum-tint); padding:4px;">
+            <button type="button" class="btn btn-outline" id="btnRemoveWatermark" style="width:auto; padding:8px 14px;">Hapus gambar</button>
+          </div>
+          <input type="file" id="setWatermarkFile" accept="image/*">
         </div>
         <label class="toggle-row"><span><b>Rincian harian di ringkasan teks</b><small>Matikan bila ingin ringkasan hanya berisi total hadir, izin, sakit, dan ghoib.</small></span><input type="checkbox" class="sw" role="switch" data-key="detail"></label>
       </div>
@@ -1078,11 +1087,24 @@
   }
 
   // Ganti warna ungu template (garis, angka, watermark) pada satu baris menjadi warna status.
+  // sourceHue memungkinkan recolor bertingkat: pertama seluruh gambar dari ungu asli
+  // template (TPL_PURPLE_HUE) ke warna tema terpilih, lalu baris status tertentu dari
+  // warna tema terpilih itu ke warna status (izin/sakit/ghoib).
   var TPL_PURPLE_HUE = 289;
-  function recolorRow(ctx, x, y, w, h, targetHue) {
+  // Warna tema untuk gambar laporan, mengikuti palet "Warna aplikasi" di Setelan.
+  // hue dihitung dari warna --plum masing-masing palet (lihat CSS :root[data-palette=...]).
+  var REPORT_PALETTE = {
+    ungu:    { color: "#79268b", tint: "rgba(121,38,139,0.12)", totalTint: "rgba(121,38,139,0.14)", hue: 289 },
+    zamrud:  { color: "#1f6b4a", tint: "rgba(31,107,74,0.12)",  totalTint: "rgba(31,107,74,0.14)",  hue: 154 },
+    samudra: { color: "#1f5f99", tint: "rgba(31,95,153,0.12)",  totalTint: "rgba(31,95,153,0.14)",  hue: 209 },
+    kurma:   { color: "#7a4a1c", tint: "rgba(122,74,28,0.12)",  totalTint: "rgba(122,74,28,0.14)",  hue: 29 },
+    mawar:   { color: "#9b2f4f", tint: "rgba(155,47,79,0.12)",  totalTint: "rgba(155,47,79,0.14)",  hue: 342 }
+  };
+  function recolorRow(ctx, x, y, w, h, targetHue, sourceHue) {
+    sourceHue = typeof sourceHue === "number" ? sourceHue : TPL_PURPLE_HUE;
     x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
     var img = ctx.getImageData(x, y, w, h), d = img.data;
-    var delta = targetHue - TPL_PURPLE_HUE;
+    var delta = targetHue - sourceHue;
     function hue2rgb(p, q, t) {
       if (t < 0) t += 1; if (t > 1) t -= 1;
       if (t < 1 / 6) return p + (q - p) * 6 * t;
@@ -1101,7 +1123,8 @@
       else if (max === g) hh = (b - r) / dl + 2;
       else hh = (r - g) / dl + 4;
       hh *= 60;
-      if (hh < 250 || hh > 320) continue;           // hanya piksel ungu
+      var hueDist = Math.abs(((hh - sourceHue + 540) % 360) - 180);
+      if (hueDist > 35) continue;                    // hanya piksel di sekitar sourceHue
       hh = ((hh + delta) % 360 + 360) % 360 / 360;
       var q = l < 0.5 ? l * (1 + sat) : l + sat - l * sat, pp = 2 * l - q;
       d[i] = Math.round(hue2rgb(pp, q, hh + 1 / 3) * 255);
@@ -1507,15 +1530,40 @@
     var m0 = currentMonthDate.getMonth();
     var nDays = daysInMonth(yr, m0);
 
-    var img = new Image();
-    img.onerror = function () { showToast("Gagal memuat template"); };
-    img.onload = function () {
+    // Muat gambar template, dan (jika ada) gambar watermark kustom, lalu gambar
+    // laporan setelah keduanya siap (atau watermark gagal/tidak dimuat).
+    var tplImg = new Image();
+    var wmImg = null;
+    var wmReady = !settings.watermark;   // tidak ada watermark -> langsung "siap"
+    var tplReady = false;
+    tplImg.onerror = function () { showToast("Gagal memuat template"); };
+    tplImg.onload = function () { tplReady = true; tryRender(); };
+    if (settings.watermark) {
+      wmImg = new Image();
+      wmImg.onload = function () { wmReady = true; tryRender(); };
+      wmImg.onerror = function () { wmImg = null; wmReady = true; tryRender(); };
+      wmImg.src = settings.watermark;
+    }
+    tplImg.src = TEMPLATE_URI;
+
+    function tryRender() {
+      if (!tplReady || !wmReady) return;
+      renderReport(tplImg, wmImg);
+    }
+
+    function renderReport(img, watermarkImg) {
       var canvas = document.createElement("canvas");
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
       var S = canvas.width / TPL.baseW;
       var ctx = canvas.getContext("2d");
       ctx.drawImage(img, 0, 0);
+
+      // Warna laporan mengikuti palet "Warna aplikasi" yang dipilih di Setelan.
+      var reportPal = REPORT_PALETTE[settings.palette] || REPORT_PALETTE.ungu;
+      var PURPLE = reportPal.color;
+      var PURPLE_TINT = reportPal.tint;
+      var targetHue = reportPal.hue;
       ctx.fillStyle = PURPLE;
       ctx.textBaseline = "alphabetic";
 
@@ -1525,6 +1573,10 @@
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, (yEnd + 1.6) * S, canvas.width, canvas.height - (yEnd + 1.6) * S);
       }
+
+      // Ganti seluruh warna ungu bawaan template (judul, garis, watermark bawaan) ke
+      // warna tema terpilih. Untuk palet "ungu" delta-nya ~0, jadi tampilan tetap sama.
+      recolorRow(ctx, 0, 0, canvas.width, canvas.height, targetHue, TPL_PURPLE_HUE);
       ctx.fillStyle = PURPLE;
 
       // Nama & bulan (di atas garis isian)
@@ -1532,6 +1584,37 @@
         S, { sizes: [26, 22, 18], multiline: false, padX: 5 });
       drawFitted(ctx, BULAN_ID[m0] + " " + yr, TPL.bulanX0 * S, TPL.bulanX1 * S, (TPL.lineY - 34) * S, (TPL.lineY - 2) * S,
         S, { sizes: [26, 22, 18], multiline: false, padX: 5 });
+
+      // Nama lembaga/halaqah & pengajar (hanya ditampilkan jika diisi di Setelan),
+      // diletakkan di celah kosong antara garis NAMA/BULAN dan header tabel.
+      var lembaga = (settings.lembaga || "").trim();
+      var pengajar = (settings.pengajar || "").trim();
+      if (lembaga || pengajar) {
+        var infoTop = (TPL.lineY + 4) * S, infoBottom = (TPL.lineY + 30) * S;
+        var infoText = [];
+        if (lembaga) infoText.push("Lembaga: " + lembaga);
+        if (pengajar) infoText.push("Pengajar: " + pengajar);
+        drawFitted(ctx, infoText.join("   |   "), TPL.namaX0 * S, 1173 * S, infoTop, infoBottom,
+          S, { sizes: [15, 13, 11], multiline: false, padX: 5 });
+      }
+
+      // Watermark kustom (jika diunggah pengguna): digambar di tengah area baris
+      // tabel yang benar-benar dipakai, dengan opasitas rendah, SETELAH recolor
+      // template tapi SEBELUM baris-baris harian supaya warna/teks baris tetap
+      // berada di atasnya.
+      if (watermarkImg) {
+        var tableX0 = 60 * S, tableX1 = 1173 * S;
+        var areaTop = TPL.row1Top * S, areaBottom = yEnd * S;
+        var maxW = (tableX1 - tableX0) * 0.65, maxH = (areaBottom - areaTop) * 0.65;
+        var ratio = Math.min(maxW / watermarkImg.naturalWidth, maxH / watermarkImg.naturalHeight);
+        var wmW = watermarkImg.naturalWidth * ratio, wmH = watermarkImg.naturalHeight * ratio;
+        var wmX = tableX0 + (tableX1 - tableX0 - wmW) / 2;
+        var wmY = areaTop + (areaBottom - areaTop - wmH) / 2;
+        ctx.save();
+        ctx.globalAlpha = 0.1;
+        ctx.drawImage(watermarkImg, wmX, wmY, wmW, wmH);
+        ctx.restore();
+      }
 
       // Isi tabel
       var keys = ["tahsin", "tahfidz", "murojaah", "keterangan"];
@@ -1543,7 +1626,7 @@
         var st = statusOf(e);
         if (st) {
           // seluruh baris berganti warna: garis, angka tanggal, lalu latar
-          recolorRow(ctx, 58 * S, top - 1.5 * S, (1175 - 58) * S, TPL.rowH * S + 2 * S, STATUS[st].hue);
+          recolorRow(ctx, 58 * S, top - 1.5 * S, (1175 - 58) * S, TPL.rowH * S + 2 * S, STATUS[st].hue, targetHue);
           ctx.fillStyle = STATUS[st].tint;
           ctx.fillRect(60 * S, top, (1173 - 60) * S, TPL.rowH * S);
         } else if (isFilled(e)) {
@@ -1568,7 +1651,7 @@
       ctx.fillStyle = "#e7e7e7";
       ctx.fillRect(sx0, sTop, labelW, sH);
       var cells = [
-        { t: "Hadir", n: tot.hadir, color: PURPLE, tint: "rgba(121,38,139,0.14)" },
+        { t: "Hadir", n: tot.hadir, color: PURPLE, tint: reportPal.totalTint },
         { t: "Izin",  n: tot.izin,  color: STATUS.izin.color,  tint: STATUS.izin.tint },
         { t: "Sakit", n: tot.sakit, color: STATUS.sakit.color, tint: STATUS.sakit.tint },
         { t: "Ghoib", n: tot.ghoib, color: STATUS.ghoib.color, tint: STATUS.ghoib.tint }
@@ -1604,11 +1687,6 @@
         return;
       }
       canvas.toBlob(function (blob) {
-<<<<<<< HEAD
-        var filename = "setoran_" + s.name.replace(/\s+/g, "_") + "_" + BULAN_ID[m0] + "_" + yr + ".png";
-        if (isNativeApp()) {
-          saveViaCapacitor(blob, filename);
-=======
         if (window.claude && typeof window.claude.use === "function") {
           window.claude.use("downloads").then(function (downloads) {
             if (!downloads) { fallbackDownload(blob, filename); return; }
@@ -1619,58 +1697,13 @@
               fallbackDownload(blob, filename);
             });
           }).catch(function () { fallbackDownload(blob, filename); });
->>>>>>> origin/main
         } else {
           fallbackDownload(blob, filename);
         }
       }, "image/png");
-    };
-    img.src = TEMPLATE_URI;
+    }
   }
 
-<<<<<<< HEAD
-  function isNativeApp() {
-    return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === "function" && window.Capacitor.isNativePlatform());
-  }
-
-  // Di dalam aplikasi Android (Capacitor), unduhan lewat <a download> pada blob:
-  // URL tidak berfungsi karena WebView Android tidak mendukungnya. Sebagai
-  // gantinya, simpan file ke cache aplikasi lalu buka lembar "Bagikan" bawaan
-  // Android supaya pengguna bisa menyimpannya ke Berkas/Galeri/aplikasi lain.
-  function saveViaCapacitor(blob, filename) {
-    var Plugins = window.Capacitor && window.Capacitor.Plugins;
-    var Filesystem = Plugins && Plugins.Filesystem;
-    if (!Filesystem) { fallbackDownload(blob, filename); return; }
-    var reader = new FileReader();
-    reader.onerror = function () { fallbackDownload(blob, filename); };
-    reader.onload = function () {
-      var base64 = String(reader.result).split(",")[1];
-      // "CACHE" adalah nilai string dari Directory.Cache pada @capacitor/filesystem;
-      // dipakai langsung (tanpa impor modul) karena halaman ini tidak memakai bundler.
-      Filesystem.writeFile({ path: filename, data: base64, directory: "CACHE" }).then(function (res) {
-        // Hapus file sementara belakangan (bukan langsung setelah share selesai),
-        // supaya aplikasi tujuan yang dipilih pengguna sempat selesai membaca isinya.
-        // 60 detik dianggap cukup lama untuk aplikasi tujuan (Files/Galeri/dll) selesai
-        // menyalin/membaca file dari content:// URI sebelum kita menghapusnya dari cache.
-        var CLEANUP_DELAY_MS = 60000;
-        var cleanup = function () {
-          setTimeout(function () { Filesystem.deleteFile({ path: filename, directory: "CACHE" }).catch(function () {}); }, CLEANUP_DELAY_MS);
-        };
-        var Share = Plugins.Share;
-        if (Share && typeof Share.share === "function") {
-          Share.share({ title: filename, url: res.uri, dialogTitle: "Simpan laporan" }).then(function () {
-            showToast("Gambar siap disimpan");
-          }).catch(function (err) {
-            if (err && /cancel/i.test(err.message || "")) return;
-            showToast("Gambar tersimpan, tidak bisa membuka menu bagikan");
-          }).then(cleanup, cleanup);
-        } else {
-          showToast("Gambar tersimpan di aplikasi");
-        }
-      }).catch(function () { fallbackDownload(blob, filename); });
-    };
-    reader.readAsDataURL(blob);
-=======
   // Native (Android app) image export: canvas -> base64 PNG -> Filesystem
   // cache file -> native Share sheet (no blob-URL <a download>, which the
   // Capacitor WebView silently ignores).
@@ -1688,7 +1721,6 @@
       console.error("Gagal membuat gambar:", err);
       alert("Gagal membuat gambar: " + (err && err.message ? err.message : err));
     }
->>>>>>> origin/main
   }
 
   function fallbackDownload(blob, filename) {
@@ -1828,7 +1860,7 @@
   // ---------------- Setelan ----------------
 
   var SETTINGS_KEY = "tahfidz_settings_v1";
-  var DEFAULT_SETTINGS = { mode: "auto", palette: "ungu", fs: 1, arabic: true, lembaga: "", pengajar: "",
+  var DEFAULT_SETTINGS = { mode: "auto", palette: "ungu", fs: 1, arabic: true, lembaga: "", pengajar: "", watermark: "",
     detail: true, suggest: true, startTab: "catat", vibrate: false, backupEvery: 7 };
   var PALETTE_KEYS = ["ungu", "zamrud", "samudra", "kurma", "mawar"];
   var DEFAULT_SUBTITLE = "Catatan tahsin \u00b7 tahfidz \u00b7 murojaah harian";
@@ -1843,6 +1875,7 @@
     if (typeof o.fs === "number" && [0.92, 1, 1.12, 1.25].indexOf(o.fs) >= 0) r.fs = o.fs;
     ["arabic", "detail", "suggest", "vibrate"].forEach(function (key) { if (typeof o[key] === "boolean") r[key] = o[key]; });
     ["lembaga", "pengajar"].forEach(function (key) { if (typeof o[key] === "string") r[key] = o[key].slice(0, 60); });
+    if (typeof o.watermark === "string" && o.watermark.length < 2000000 && /^data:image\//.test(o.watermark)) r.watermark = o.watermark;
     if (["catat", "laporan"].indexOf(o.startTab) >= 0) r.startTab = o.startTab;
     if (typeof o.backupEvery === "number" && [0, 7, 14, 30].indexOf(o.backupEvery) >= 0) r.backupEvery = o.backupEvery;
     return r;
@@ -1893,6 +1926,15 @@
         el.value = val;
       }
     });
+    var wmWrap = document.getElementById("watermarkPreviewWrap");
+    var wmPreview = document.getElementById("watermarkPreview");
+    if (settings.watermark) {
+      wmPreview.src = settings.watermark;
+      wmWrap.style.display = "flex";
+    } else {
+      wmPreview.src = "";
+      wmWrap.style.display = "none";
+    }
   }
 
   function commitSettings() {
@@ -1920,6 +1962,36 @@
       settings[el.getAttribute("data-key")] = el.value;
       commitSettings();
     });
+  });
+
+  // Watermark laporan: baca gambar yang dipilih, kecilkan ukurannya (maks 600px)
+  // supaya hemat tempat di localStorage, lalu simpan sebagai data URL PNG.
+  document.getElementById("setWatermarkFile").addEventListener("change", function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        var maxDim = 600;
+        var scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+        var w = Math.round(img.naturalWidth * scale), h = Math.round(img.naturalHeight * scale);
+        var canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        settings.watermark = canvas.toDataURL("image/png");
+        commitSettings();
+        e.target.value = "";
+      };
+      img.onerror = function () { showToast("Gagal membaca gambar"); e.target.value = ""; };
+      img.src = reader.result;
+    };
+    reader.onerror = function () { showToast("Gagal membaca gambar"); e.target.value = ""; };
+    reader.readAsDataURL(file);
+  });
+  document.getElementById("btnRemoveWatermark").addEventListener("click", function () {
+    settings.watermark = "";
+    commitSettings();
   });
 
   function renderSettingsTab() {
