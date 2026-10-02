@@ -1054,6 +1054,11 @@
 
   var PURPLE = "#79268b";
   var PURPLE_TINT = "rgba(121,38,139,0.12)";
+  // Geometri garis kisi tabel (dibangun ulang programatik - lihat redrawTableGrid()).
+  var TPL_TABLE_X0 = 58, TPL_TABLE_X1 = 1175;
+  var TPL_COL_LINES = [122, 403, 681, 960];
+  var TPL_LINE_DARK = "#712a7d";   // garis tebal (batas header/baris-1, pembatas kolom)
+  var TPL_LINE_LIGHT = "#ddbce6";  // garis tipis pemisah antar-baris
   var STATUS = {
     izin:  { label: "Izin",  color: "#1d6fd1", tint: "rgba(29,111,209,0.16)", hue: 212 },
     sakit: { label: "Sakit", color: "#c96a00", tint: "rgba(217,119,6,0.18)", hue: 33 },
@@ -1132,6 +1137,41 @@
       d[i + 2] = Math.round(hue2rgb(pp, q, hh - 1 / 3) * 255);
     }
     ctx.putImageData(img, x, y);
+  }
+
+  // Hapus logo/watermark bawaan yang baku (baked) di gambar template, lalu
+  // gambar ulang garis-garis kisi tabel secara terprogram. Dipanggil SEBELUM
+  // recolorRow() global, supaya garis yang digambar ulang ini ikut ter-ubah
+  // warnanya mengikuti palet yang dipilih bersama elemen template lain.
+  function redrawTableGrid(ctx, S) {
+    var x0 = TPL_TABLE_X0 * S, x1 = TPL_TABLE_X1 * S;
+    var yTop = TPL.row1Top * S, yBot = (TPL.row1Top + 31 * TPL.rowH) * S;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(x0, yTop, x1 - x0, yBot - yTop);
+
+    ctx.strokeStyle = TPL_LINE_LIGHT;
+    ctx.lineWidth = 1.6 * S;
+    ctx.beginPath();
+    for (var d = 1; d <= 31; d++) {
+      var y = (TPL.row1Top + d * TPL.rowH) * S;
+      ctx.moveTo(x0, y); ctx.lineTo(x1, y);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle = TPL_LINE_DARK;
+    ctx.lineWidth = 2.6 * S;
+    ctx.beginPath();
+    ctx.moveTo(x0, yTop); ctx.lineTo(x1, yTop);
+    ctx.stroke();
+
+    ctx.lineWidth = 2.2 * S;
+    ctx.beginPath();
+    TPL_COL_LINES.forEach(function (cx) {
+      var x = cx * S;
+      ctx.moveTo(x, yTop); ctx.lineTo(x, yBot);
+    });
+    ctx.stroke();
   }
 
   function syncChips(textareaId) {
@@ -1558,6 +1598,10 @@
       var S = canvas.width / TPL.baseW;
       var ctx = canvas.getContext("2d");
       ctx.drawImage(img, 0, 0);
+
+      // Hapus logo/watermark bawaan (baked-in) template, lalu gambar ulang
+      // garis kisi tabel secara terprogram sebelum elemen lain digambar.
+      redrawTableGrid(ctx, S);
 
       // Warna laporan mengikuti palet "Warna aplikasi" yang dipilih di Setelan.
       var reportPal = REPORT_PALETTE[settings.palette] || REPORT_PALETTE.ungu;
